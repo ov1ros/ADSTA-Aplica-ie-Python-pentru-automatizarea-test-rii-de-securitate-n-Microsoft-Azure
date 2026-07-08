@@ -1,0 +1,1 @@
+# ADSTA-Aplica-ie-Python-pentru-automatizarea-test-rii-de-securitate-n-Microsoft-Azure
