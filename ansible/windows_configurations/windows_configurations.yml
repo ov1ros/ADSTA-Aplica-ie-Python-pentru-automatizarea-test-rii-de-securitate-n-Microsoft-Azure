@@ -1,0 +1,423 @@
+---
+# Playbook used to configure the Windows virtual machines for the DVWA environment.
+- name: Configurările necesare pentru mașinile virtuale Windows.
+  hosts: dvwa_windows
+  gather_facts: no
+
+  # Loads the Windows credentials used for the WinRM connection.
+  vars_files:
+    - windows_credentials.yml
+  
+  # Defines common paths and download locations used during the DVWA installation.
+  vars:
+    xampp_path: 'C:\xampp'
+    dvwa_path: 'C:\xampp\htdocs\DVWA'
+    dvwa_zip_url: 'https://github.com/digininja/DVWA/archive/refs/heads/master.zip'
+    dvwa_zip_path: 'C:\Windows\Temp\dvwa.zip'
+    dvwa_extract_path: 'C:\Windows\Temp\dvwa-src'
+
+  tasks:
+  
+    # Checks if the Windows virtual machines can be reached through WinRM.
+    - name: Verificare conexiune WinRM
+      ansible.windows.win_ping:
+
+    # Checks the current Windows Firewall state before applying changes.
+    - name: Verificare dacă Windows Firewall este deja configurat
+      ansible.windows.win_powershell:
+        script: |
+          $desired = [System.Convert]::ToBoolean('{{ firewall_enabled | lower }}')
+          $profiles = Get-NetFirewallProfile -Profile Domain,Public,Private
+          $different = $profiles | Where-Object { $_.Enabled -ne $desired }
+
+          if ($different.Count -eq 0) {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: firewall_status
+      changed_when: false
+
+    # Enables or disables Windows Firewall based on the host variable.
+    - name: Se configurează Windows Firewall
+      ansible.windows.win_powershell:
+        script: |
+          if ('{{ firewall_enabled | lower }}' -eq 'true') {
+            Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+          } else {
+            Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+          }
+      when: "'missing' in firewall_status.output"
+
+    # Checks if the inbound HTTP firewall rule for Apache already exists.
+    - name: Verificare dacă regula Allow Apache HTTP există
+      ansible.windows.win_powershell:
+        script: |
+          $ruleName = "Allow Apache HTTP"
+
+          if (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue) {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: apache_http_rule
+      changed_when: false
+
+    # Creates an inbound firewall rule that allows HTTP traffic to Apache.
+    - name: Permitere acces HTTP către Apache când firewall-ul este activ
+      ansible.windows.win_powershell:
+        script: |
+          New-NetFirewallRule `
+            -DisplayName "Allow Apache HTTP" `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort 80 `
+            -Action Allow `
+            -Profile Domain,Private,Public
+      when: 
+        - firewall_enabled | bool
+        - "'missing' in apache_http_rule.output"
+
+    # Checks if Chocolatey is already installed on the Windows VM.
+    - name: Verificare dacă Chocolatey este deja instalat
+      ansible.windows.win_stat:
+          path: 'C:\ProgramData\chocolatey\bin\choco.exe'
+      register: chocolatey_exists
+    
+    # Installs Chocolatey if it is not installed. 
+    - name: Se instalează Chocolatey
+      chocolatey.chocolatey.win_chocolatey:
+        name: chocolatey
+        state: present
+      when: not chocolatey_exists.stat.exists
+
+    # Checks if XAMPP is already installed on the Windows VM.
+    - name: Verificare dacă XAMPP există
+      ansible.windows.win_stat:
+        path: "{{ xampp_path }}\\xampp-control.exe"
+      register: xampp_exists
+
+    # Installs XAMPP using Chocolatey if it is not installed.
+    - name: Se instalează XAMPP
+      chocolatey.chocolatey.win_chocolatey:
+        name: xampp-81
+        state: present
+      when: not xampp_exists.stat.exists
+
+    # Checks if Apache is already registered as a Windows service.
+    - name: Verificare dacă Apache este deja serviciu Windows
+      ansible.windows.win_service_info:
+        name: Apache2.4
+      register: apache_service_exists
+    
+    # Registers Apache as a Windows service if is not registered.
+    - name: Se instalează Apache ca serviciu Windows
+      ansible.windows.win_powershell:
+        script: |
+          $apache_script = "{{ xampp_path }}\apache\apache_installservice.bat"
+
+          if (-not (Test-Path $apache_script)) {
+            throw "Scriptul apache_installservice.bat nu a fost gasit."
+          }
+
+          Set-Location "{{ xampp_path }}\apache"
+          cmd.exe /c apache_installservice.bat
+      when: apache_service_exists.services | length == 0
+
+    # Checks if MySQL is already registered as a Windows service.
+    - name: Verificare dacă MySQL este deja serviciu Windows
+      ansible.windows.win_service_info:
+        name: MySQL
+      register: mysql_service_exists
+
+    # Registers MySQL as a Windows service if is not registered.
+    - name: Se instalează MySQL ca serviciu Windows
+      ansible.windows.win_powershell:
+        script: |
+          $mysql_script = "{{ xampp_path }}\mysql\mysql_installservice.bat"
+
+          if (-not (Test-Path $mysql_script)) {
+            throw "Scriptul mysql_installservice.bat nu a fost găsit."
+          }
+
+          Set-Location "{{ xampp_path }}\mysql"
+          cmd.exe /c mysql_installservice.bat
+      when: mysql_service_exists.services | length == 0
+
+    # Checks if the Apache service is active.
+    - name: Verificare dacă Apache este pornit
+      ansible.windows.win_service_info:
+        name: Apache2.4
+      register: apache_service_status
+
+    # Starts Apache and sets it to start automatically if needed.
+    - name: Se pornește Apache ca serviciu Windows
+      ansible.windows.win_service:
+        name: Apache2.4
+        start_mode: auto
+        state: started
+      when:
+        - apache_service_status.services | length > 0
+        - apache_service_status.services[0].state != 'running' or apache_service_status.services[0].start_mode != 'auto'
+
+    # Checks if the MySQL service is active.
+    - name: Verificare dacă MySQL este pornit
+      ansible.windows.win_service_info:
+        name: MySQL
+      register: mysql_service_status
+
+    # Starts MySQL and sets it to start automatically if needed.
+    - name: Se pornește MySQL ca serviciu Windows
+      ansible.windows.win_service:
+        name: MySQL
+        start_mode: auto
+        state: started
+      when:
+        - mysql_service_status.services | length > 0
+        - mysql_service_status.services[0].state != 'running' or mysql_service_status.services[0].start_mode != 'auto'
+
+    # Checks if the temporary DVWA extraction folder already exists.
+    - name: Verificare dacă folderul temporar pentru DVWA există
+      ansible.windows.win_stat:
+        path: "{{ dvwa_extract_path }}"
+      register: dvwa_temp_folder_exists
+
+    # Creates the temporary folder used for extracting the DVWA archive if it is missing.
+    - name: Se creează folder temporar pentru DVWA
+      ansible.windows.win_file:
+        path: "{{ dvwa_extract_path }}"
+        state: directory
+      when: not dvwa_temp_folder_exists.stat.exists
+
+    # Checks if the DVWA archive has already been downloaded
+    - name: Verificare dacă arhiva DVWA există deja
+      ansible.windows.win_stat:
+        path: "{{ dvwa_zip_path }}"
+      register: dvwa_zip_exists
+
+    # Downloads the DVWA archive from GitHub only if it is not already present on the Windows VM.
+    - name: Se descarcă DVWA de pe GitHub
+      ansible.windows.win_get_url:
+        url: "{{ dvwa_zip_url }}"
+        dest: "{{ dvwa_zip_path }}"
+      when: not dvwa_zip_exists.stat.exists
+
+    - name: Verificare dacă DVWA e deja dezarhivat
+      ansible.windows.win_stat:
+          path: "{{ dvwa_extract_path }}\\DVWA-master\\index.php"
+      register: dvwa_extras
+
+    - name: Se dezarhivează DVWA
+      community.windows.win_unzip:
+        src: "{{ dvwa_zip_path }}"
+        dest: "{{ dvwa_extract_path }}"
+        delete_archive: no
+      when: not dvwa_extras.stat.exists
+
+    - name: Verificare dacă DVWA există în htdocs
+      ansible.windows.win_stat:
+        path: "{{ dvwa_path }}\\index.php"
+      register: dvwa_htdocs
+
+    - name: Se copiază DVWA în htdocs
+      ansible.windows.win_copy:
+        src: "{{ dvwa_extract_path }}\\DVWA-master\\"
+        dest: "{{ dvwa_path }}"
+        remote_src: yes
+      when: not dvwa_htdocs.stat.exists
+
+    - name: Verificare dacă config.inc.php există
+      ansible.windows.win_stat:
+        path: "{{ dvwa_path }}\\config\\config.inc.php"
+      register: dvwa_config
+
+    - name: Se creează config.inc.php din config.inc.php.dist
+      ansible.windows.win_copy:
+        src: "{{ dvwa_path }}\\config\\config.inc.php.dist"
+        dest: "{{ dvwa_path }}\\config\\config.inc.php"
+        remote_src: yes
+      when: not dvwa_config.stat.exists
+
+    - name: Verificare dacă security level în DVWA este deja configurat
+      ansible.windows.win_powershell:
+        script: |
+          $config = '{{ dvwa_path }}\config\config.inc.php'
+
+          if (-not (Test-Path $config)) {
+            "missing"
+            exit
+          }
+
+          $content = Get-Content -Path $config -Raw
+          $pattern = '\$_DVWA\[\s*''default_security_level''\s*\]\s*=\s*''{{ dvwa_security_level }}'';'
+
+          if ($content -match $pattern) {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: dvwa_security_status
+      changed_when: false
+
+    - name: Se configurează security level în DVWA
+      ansible.windows.win_powershell:
+        script: |
+          $config = '{{ dvwa_path }}\config\config.inc.php'
+          $content = Get-Content -Path $config -Raw
+
+          $content = $content -replace '\$_DVWA\[\s*''default_security_level''\s*\]\s*=\s*.*?;', '$$_DVWA[ ''default_security_level'' ] = ''{{ dvwa_security_level }}'';'
+
+          Set-Content -Path $config -Value $content -Encoding UTF8 -NoNewline
+      when: "'missing' in dvwa_security_status.output"      
+
+    - name: Se verifică dacă allow_url_include și allow_url_fopen sunt deja active
+      ansible.windows.win_powershell:
+        script: |
+          $phpini = '{{ xampp_path }}\php\php.ini'
+
+          if (-not (Test-Path $phpini)) {
+            "missing"
+            exit
+          }
+
+          $content = Get-Content -Path $phpini -Raw
+
+          if (($content -match 'allow_url_include=On') -and ($content -match 'allow_url_fopen=On')) {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: php_settings_status
+      changed_when: false
+
+    - name: Se activează allow_url_include și allow_url_fopen în php.ini
+      ansible.windows.win_powershell:
+        script: |
+          $phpini = '{{ xampp_path }}\php\php.ini'
+
+          $content = Get-Content -Path $phpini -Raw
+          $content = $content -replace 'allow_url_include=Off', 'allow_url_include=On'
+          $content = $content -replace 'allow_url_fopen=Off', 'allow_url_fopen=On'
+
+          Set-Content -Path $phpini -Value $content -Encoding UTF8 -NoNewline
+      when: "'missing' in php_settings_status.output"
+
+    - name: Se repornește Apache ca serviciu Windows
+      ansible.windows.win_service:
+        name: Apache2.4
+        state: restarted
+
+    - name: Se repornește MySQL ca serviciu Windows
+      ansible.windows.win_service:
+        name: MySQL
+        state: restarted
+
+    - name: Se așteaptă după restart servicii
+      ansible.windows.win_shell: |
+        Start-Sleep -Seconds 10
+      args:
+        executable: powershell.exe
+
+    - name: Verificare dacă baza de date dvwa și userul dvwa există
+      ansible.windows.win_powershell:
+        script: |
+          $mysql = '{{ xampp_path }}\mysql\bin\mysql.exe'
+
+          if (-not (Test-Path $mysql)) {
+            "missing"
+            exit
+          }
+
+          $db = & $mysql -u root -N -e "SHOW DATABASES LIKE 'dvwa';"
+          $user = & $mysql -u root -N -e "SELECT User FROM mysql.user WHERE User='dvwa' AND Host='localhost';"
+
+          if ($db -match 'dvwa' -and $user -match 'dvwa') {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: dvwa_database_status
+      changed_when: false
+
+    - name: Se creează baza de date dvwa și userul dvwa
+      ansible.windows.win_powershell:
+        script: |
+          $mysql = '{{ xampp_path }}\mysql\bin\mysql.exe'
+
+          $sql = @"
+          CREATE DATABASE IF NOT EXISTS dvwa;
+          CREATE USER IF NOT EXISTS 'dvwa'@'localhost' IDENTIFIED BY 'p@ssw0rd';
+          GRANT ALL PRIVILEGES ON dvwa.* TO 'dvwa'@'localhost';
+          FLUSH PRIVILEGES;
+          "@
+
+          $sql | & $mysql -u root
+
+          if ($LASTEXITCODE -ne 0) { 
+            throw "Eroare la crearea DB/user dvwa." 
+          }
+      when: "'missing' in dvwa_database_status.output"
+
+    - name: Verificare dacă tabelele DVWA există deja
+      ansible.windows.win_powershell:
+        script: |
+          $mysql = '{{ xampp_path }}\mysql\bin\mysql.exe'
+
+          if (-not (Test-Path $mysql)) {
+            "missing"
+            exit
+          }
+
+          $check = & $mysql -u root -N -e "SHOW TABLES FROM dvwa LIKE 'users';"
+
+          if ($check -match 'users') {
+            "exists"
+          } else {
+            "missing"
+          }
+      register: dvwa_tables
+      changed_when: false
+
+    - name: Se inițializează tabelele DVWA prin /setup.php 
+      ansible.windows.win_powershell:
+        script: |
+          $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+          $url = 'http://localhost/DVWA/setup.php'
+
+          $r1 = Invoke-WebRequest -Uri $url -WebSession $session -UseBasicParsing
+
+          $m = [regex]::Match($r1.Content, "name\s*=\s*['""]user_token['""]\s+value\s*=\s*['""]([a-f0-9]+)['""]")
+          if (-not $m.Success) {
+            $m = [regex]::Match($r1.Content, "value\s*=\s*['""]([a-f0-9]+)['""]\s+name\s*=\s*['""]user_token['""]")
+          }
+          if (-not $m.Success) {
+            throw "Nu am gasit user_token in setup.php."
+          }
+          $token = $m.Groups[1].Value
+          Write-Output "Token CSRF obtinut"
+
+          $body = @{ create_db = 'Create / Reset Database'; user_token = $token }
+          $r2 = Invoke-WebRequest -Uri $url -Method POST -Body $body `
+                -WebSession $session -UseBasicParsing
+
+          if ($r2.Content -match 'Database has been created' -or
+              $r2.Content -match 'Setup successful' -or
+              $r2.Content -match 'login\.php') {
+            Write-Output "Tabelele DVWA au fost create cu succes"
+          } else {
+            Write-Warning "Tabelele DVWA nu au fost create"
+          }
+      when: "'missing' in dvwa_tables.output"
+
+    - name: Se deschide automat Edge cu DVWA la login
+      community.windows.win_shortcut:
+        dest: 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\DVWA.lnk'
+        src: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+        arguments: '--new-window --start-maximized http://localhost/DVWA/login.php'
+              
+    - name: Afișare informații
+      ansible.builtin.debug:
+        msg:
+          - "DVWA a fost configurat pentru {{ inventory_hostname }}!"
+          - "Security level: {{ dvwa_security_level }}"
+          - "Firewall activat: {{ firewall_enabled }}"
