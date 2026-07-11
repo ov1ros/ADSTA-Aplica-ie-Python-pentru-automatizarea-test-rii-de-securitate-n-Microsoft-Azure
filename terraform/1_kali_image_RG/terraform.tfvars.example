@@ -1,0 +1,9 @@
+# This is an example variables file.
+# To use it, copy this file or rename it to terraform.tfvars .
+# Before running Terraform, replace the example values with your own values.
+
+# Azure subscription used for creating the Kali image resource group.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Azure region where the Kali image resource group will be created.
+location = "polandcentral"
