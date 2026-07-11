@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Automated DVWA Security Testing App
+Comment=Configure the Windows VMs and run the attacks
+Exec=sh -c 'cd /usr/share/adsta/python_app && python3 adsta.py'
+Icon=/usr/share/adsta/python_app/app_icon.png
+Terminal=false

@@ -1,0 +1,5 @@
+vulnerable_vm_ip = "10.0.2.10"
+protected_vm_ip = "10.0.3.10"
+
+windows_username = "your_windows_username"
+windows_password = "your_windows_password"
