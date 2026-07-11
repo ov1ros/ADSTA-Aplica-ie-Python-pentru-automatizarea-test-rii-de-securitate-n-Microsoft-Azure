@@ -1,0 +1,9 @@
+# This is an example variables file.
+# To use it, copy this file or rename it to packer.auto.pkrvars.hcl .
+# Before running Packer, replace the example values with your own values.
+
+# Azure subscription used for creating the custom Kali Linux image.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Azure region where the custom Kali Linux image will be created.
+location = "polandcentral"
