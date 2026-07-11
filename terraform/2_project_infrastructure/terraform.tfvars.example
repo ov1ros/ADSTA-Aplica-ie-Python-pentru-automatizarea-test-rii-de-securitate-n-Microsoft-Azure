@@ -1,0 +1,43 @@
+# This is an example variables file.
+# To use it, copy this file or rename it to terraform.tfvars .
+# Before running Terraform, replace the example values with your own values.
+
+# Azure subscription used for deploying the main project infrastructure.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Basic project configuration.
+# The project name is used when generating Azure resource names.
+project_name = "example"
+
+# Azure region where the main infrastructure will be deployed.
+location = "polandcentral"
+
+# Administrator username used for the Windows VMs and the Kali VM.
+admin_username = "your_admin_username"
+
+# Administrator password used for the Windows virtual machines.
+admin_password = "your_windows_password"
+
+# Administrator password used for the Kali Linux virtual machine.
+kali_admin_password = "your_kali_password"
+
+# Virtual network address space used.
+vnet_address_space = ["10.0.0.0/16"]
+
+# Subnet used by the Kali Linux virtual machine.
+snet_kali_prefix = "10.0.1.0/24"
+
+# Subnet used by the vulnerable Windows virtual machine.
+snet_vulnerable_prefix = "10.0.2.0/24"
+
+# Subnet used by the protected Windows virtual machine.
+snet_protected_prefix = "10.0.3.0/24"
+
+# Static private IP address assigned to the Kali Linux virtual machine.
+kali_private_ip = "10.0.1.10"
+
+# Static private IP address assigned to the vulnerable Windows virtual machine.
+vulnerable_private_ip = "10.0.2.10"
+
+# Static private IP address assigned to the protected Windows virtual machine.
+protected_private_ip = "10.0.3.10"
