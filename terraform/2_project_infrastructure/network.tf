@@ -55,16 +55,16 @@ resource "azurerm_network_security_group" "nsg_kali" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
 
-  # SSH (22) and RDP (3389) access are allowed only from the user's public IP.
+  # RDP (3389) access is allowed only from the user's public IP.
 
   security_rule {
-    name                       = "SSH-RDP-AdminIP"
+    name                       = "RDP-AdminIP"
     priority                   = 100
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_ranges    = ["22", "3389"]
+    destination_port_ranges    = "3389"
     source_address_prefix      = local.admin_ip_cidr
     destination_address_prefix = "*"
   }
